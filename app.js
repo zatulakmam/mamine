@@ -1,64 +1,9 @@
-// MemoryLane — app.js
-// Dual-Mode Architecture:
-// 1. Supabase Cloud Database (PostgreSQL Auth & Storage across all devices on Vercel)
-// 2. Offline / Local Database (IndexedDB + localStorage fallback)
+// mamine — app.js
+// 100% Client-Side & Local Database (IndexedDB + localStorage)
+// Tanpa konfigurasi eksternal — Langsung jalan out-of-the-box!
 
 // ============================================================
-//  SUPABASE CLOUD DATABASE CONFIGURATION
-// ============================================================
-let sbClient = null;
-
-function getDbConfig() {
-  const saved = localStorage.getItem('ml_supabase_cfg');
-  if (saved) {
-    try { return JSON.parse(saved); } catch (_) {}
-  }
-  return {
-    url: '',
-    key: ''
-  };
-}
-
-function initSupabase() {
-  const cfg = getDbConfig();
-  if (cfg.url && cfg.key && window.supabase && typeof window.supabase.createClient === 'function') {
-    try {
-      sbClient = window.supabase.createClient(cfg.url, cfg.key);
-      updateDbStatusUI(true, 'Terhubung ke Supabase Cloud DB');
-      return true;
-    } catch (e) {
-      console.warn('Supabase init failed:', e);
-      sbClient = null;
-      updateDbStatusUI(false, 'Gagal terhubung ke Supabase: ' + e.message);
-      return false;
-    }
-  }
-  sbClient = null;
-  updateDbStatusUI(false, 'Mode Database Lokal (Offline)');
-  return false;
-}
-
-function updateDbStatusUI(isCloud, descText) {
-  const btn = document.getElementById('db-status-btn');
-  const authLink = document.getElementById('auth-db-link');
-  const desc = document.getElementById('db-status-desc');
-
-  const label = isCloud ? '[ ⚡ DB: CLOUD ]' : '[ ⚡ DB: LOKAL ]';
-  if (btn) {
-    btn.textContent = label;
-    if (isCloud) btn.classList.add('cloud-active');
-    else btn.classList.remove('cloud-active');
-  }
-  if (authLink) {
-    authLink.textContent = isCloud ? '[ ⚡ DB: SUPABASE CLOUD ]' : '[ ⚡ DB: LOKAL (Klik utk Cloud) ]';
-  }
-  if (desc) {
-    desc.textContent = 'Status: ' + descText;
-  }
-}
-
-// ============================================================
-//  INDEXEDDB SETUP (LOCAL DATABASE FALLBACK)
+//  INDEXEDDB SETUP (LOCAL DATABASE)
 // ============================================================
 let db = null;
 
@@ -69,7 +14,7 @@ function initIndexedDB() {
       return;
     }
     try {
-      const req = indexedDB.open('MemoryLaneDB', 2);
+      const req = indexedDB.open('MamineDB', 2);
 
       req.onupgradeneeded = (e) => {
         const database = e.target.result;
@@ -100,7 +45,7 @@ function initIndexedDB() {
 function idbGetAll(storeName, indexName, key) {
   return new Promise((resolve) => {
     if (!db) {
-      const fallbackKey = storeName === 'albums' ? 'ml_albums_fallback' : 'ml_photos_fallback';
+      const fallbackKey = storeName === 'albums' ? 'mamine_albums' : 'mamine_photos';
       const all = JSON.parse(localStorage.getItem(fallbackKey) || '[]');
       const filtered = key ? all.filter(p => p[indexName] === key) : all;
       resolve(filtered);
@@ -121,7 +66,7 @@ function idbGetAll(storeName, indexName, key) {
 function idbPut(storeName, data) {
   return new Promise((resolve) => {
     if (!db) {
-      const fallbackKey = storeName === 'albums' ? 'ml_albums_fallback' : 'ml_photos_fallback';
+      const fallbackKey = storeName === 'albums' ? 'mamine_albums' : 'mamine_photos';
       const all = JSON.parse(localStorage.getItem(fallbackKey) || '[]');
       const idx = all.findIndex(p => p.id === data.id);
       if (idx >= 0) all[idx] = data; else all.push(data);
@@ -144,7 +89,7 @@ function idbPut(storeName, data) {
 function idbDelete(storeName, id) {
   return new Promise((resolve) => {
     if (!db) {
-      const fallbackKey = storeName === 'albums' ? 'ml_albums_fallback' : 'ml_photos_fallback';
+      const fallbackKey = storeName === 'albums' ? 'mamine_albums' : 'mamine_photos';
       const all = JSON.parse(localStorage.getItem(fallbackKey) || '[]');
       const filtered = all.filter(p => p.id !== id);
       try { localStorage.setItem(fallbackKey, JSON.stringify(filtered)); } catch (_) {}
@@ -164,20 +109,20 @@ function idbDelete(storeName, id) {
 }
 
 // ============================================================
-//  AUTH (SUPABASE OR LOCAL STORAGE)
+//  AUTH (LOCAL STORAGE + HASHED PASSWORD)
 // ============================================================
 async function hashPassword(password) {
   try {
     if (window.crypto && window.crypto.subtle) {
       const encoder = new TextEncoder();
-      const data = encoder.encode(password + '_mc_salt');
+      const data = encoder.encode(password + '_mamine_salt');
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
       return Array.from(new Uint8Array(hashBuffer))
         .map(b => b.toString(16).padStart(2, '0')).join('');
     }
   } catch (_) {}
   let hash = 5381;
-  const str = password + '_mc_salt';
+  const str = password + '_mamine_salt';
   for (let i = 0; i < str.length; i++) {
     hash = ((hash << 5) + hash) + str.charCodeAt(i);
     hash |= 0;
@@ -186,25 +131,25 @@ async function hashPassword(password) {
 }
 
 function getLocalUsers() {
-  return JSON.parse(localStorage.getItem('ml_users') || '[]');
+  return JSON.parse(localStorage.getItem('mamine_users') || '[]');
 }
 
 function saveLocalUsers(users) {
-  localStorage.setItem('ml_users', JSON.stringify(users));
+  localStorage.setItem('mamine_users', JSON.stringify(users));
 }
 
 function getCurrentUser() {
-  const u = sessionStorage.getItem('ml_current') || localStorage.getItem('ml_current_saved');
+  const u = sessionStorage.getItem('mamine_current') || localStorage.getItem('mamine_current_saved');
   return u ? JSON.parse(u) : null;
 }
 
 function setCurrentUser(user) {
   if (user) {
-    sessionStorage.setItem('ml_current', JSON.stringify(user));
-    localStorage.setItem('ml_current_saved', JSON.stringify(user));
+    sessionStorage.setItem('mamine_current', JSON.stringify(user));
+    localStorage.setItem('mamine_current_saved', JSON.stringify(user));
   } else {
-    sessionStorage.removeItem('ml_current');
-    localStorage.removeItem('ml_current_saved');
+    sessionStorage.removeItem('mamine_current');
+    localStorage.removeItem('mamine_current_saved');
   }
 }
 
@@ -242,7 +187,6 @@ const DEMO_ALBUMS = [
 // ============================================================
 async function boot() {
   await initIndexedDB();
-  initSupabase();
 
   const saved = getCurrentUser();
   if (saved) {
@@ -275,6 +219,7 @@ function showApp() {
 
 function showErr(elId, msg) {
   const el = document.getElementById(elId);
+  if (!el) return;
   el.textContent = '> ERROR: ' + msg;
   el.style.display = 'block';
 }
@@ -304,34 +249,6 @@ window.handleLogin = async function() {
     return;
   }
 
-  // 1. If Supabase Cloud DB is active
-  if (sbClient) {
-    try {
-      const { data, error } = await sbClient.auth.signInWithPassword({
-        email,
-        password: pass
-      });
-      if (error) {
-        showErr('login-error', error.message || 'Login cloud gagal.');
-        return;
-      }
-      currentUser = {
-        uid: data.user.id,
-        email: data.user.email,
-        name: data.user.user_metadata?.name || email.split('@')[0]
-      };
-      setCurrentUser(currentUser);
-      guestModeActive = false;
-      showApp();
-      await loadData();
-      return;
-    } catch (err) {
-      showErr('login-error', 'Koneksi error: ' + err.message);
-      return;
-    }
-  }
-
-  // 2. Local Database Mode
   const users = getLocalUsers();
   const hash  = await hashPassword(pass);
   const user  = users.find(u => u.email === email && u.hash === hash);
@@ -358,37 +275,6 @@ window.handleRegister = async function() {
   if (pass.length < 6)          { showErr('reg-error', 'Password minimal 6 karakter.'); return; }
   if (!email.includes('@'))     { showErr('reg-error', 'Format email tidak valid.'); return; }
 
-  // 1. Supabase Cloud DB Registration
-  if (sbClient) {
-    try {
-      const { data, error } = await sbClient.auth.signUp({
-        email,
-        password: pass,
-        options: { data: { name } }
-      });
-      if (error) {
-        showErr('reg-error', error.message || 'Pendaftaran cloud gagal.');
-        return;
-      }
-      if (data?.user) {
-        currentUser = {
-          uid: data.user.id,
-          email: data.user.email,
-          name: name
-        };
-        setCurrentUser(currentUser);
-        guestModeActive = false;
-        showApp();
-        await loadData();
-        return;
-      }
-    } catch (err) {
-      showErr('reg-error', 'Koneksi error: ' + err.message);
-      return;
-    }
-  }
-
-  // 2. Local Database Registration
   const users = getLocalUsers();
   if (users.find(u => u.email === email)) {
     showErr('reg-error', 'Email sudah terdaftar!');
@@ -411,10 +297,7 @@ window.handleRegister = async function() {
   document.getElementById('reg-pass').value  = '';
 };
 
-window.handleLogout = async function() {
-  if (sbClient) {
-    try { await sbClient.auth.signOut(); } catch (_) {}
-  }
+window.handleLogout = function() {
   guestModeActive = false;
   currentUser = null;
   setCurrentUser(null);
@@ -444,47 +327,6 @@ window.guestMode = function() {
 async function loadData() {
   if (guestModeActive || !currentUser) return;
 
-  // 1. Load from Supabase Cloud DB
-  if (sbClient) {
-    try {
-      const [photoRes, albumRes] = await Promise.all([
-        sbClient.from('photos').select('*').order('created_at', { ascending: false }),
-        sbClient.from('albums').select('*').order('created_at', { ascending: true })
-      ]);
-
-      if (!photoRes.error && photoRes.data) {
-        allPhotos = photoRes.data.map(p => ({
-          ...p,
-          createdAt: new Date(p.created_at || p.createdAt)
-        }));
-      }
-      if (!albumRes.error && albumRes.data) {
-        allAlbums = albumRes.data.map(a => ({
-          ...a,
-          createdAt: new Date(a.created_at || a.createdAt)
-        }));
-      }
-    } catch (e) {
-      console.warn('Supabase fetch failed, falling back to local DB:', e);
-      await loadLocalData();
-    }
-  } else {
-    // 2. Load from IndexedDB
-    await loadLocalData();
-  }
-
-  // Ensure any albums mentioned in photos exist in allAlbums
-  syncPhotosAlbums();
-
-  filteredPhotos = [...allPhotos];
-  renderGallery(filteredPhotos);
-  renderAlbums();
-  renderFavorites();
-  renderMemories(allPhotos);
-  updateCounts();
-}
-
-async function loadLocalData() {
   try {
     const [photos, albums] = await Promise.all([
       idbGetAll('photos', 'uid', currentUser.uid),
@@ -501,10 +343,19 @@ async function loadLocalData() {
       createdAt: new Date(a.createdAt || 0)
     }));
   } catch (e) {
-    console.error('Local data load failed:', e);
+    console.error('Data load failed:', e);
     allPhotos = [];
     allAlbums = [];
   }
+
+  syncPhotosAlbums();
+
+  filteredPhotos = [...allPhotos];
+  renderGallery(filteredPhotos);
+  renderAlbums();
+  renderFavorites();
+  renderMemories(allPhotos);
+  updateCounts();
 }
 
 function syncPhotosAlbums() {
@@ -530,7 +381,7 @@ function updateCounts() {
 }
 
 // ============================================================
-//  ALBUM LOGIC (FIX FOR USER SCREENSHOT)
+//  ALBUM LOGIC
 // ============================================================
 window.createAlbumPrompt = function() {
   document.getElementById('create-album-modal').style.display = 'flex';
@@ -565,30 +416,15 @@ window.createAlbum = async function() {
   input.value = '';
   document.getElementById('create-album-modal').style.display = 'none';
 
-  // Render album grid immediately!
+  // Render album grid immediately
   renderAlbums();
 
-  // Open the newly created album directly so user can add photos!
+  // Open the newly created album directly so user can add photos
   openAlbum(albumName);
 };
 
 async function saveAlbumToDb(album) {
   if (guestModeActive) return;
-
-  if (sbClient) {
-    try {
-      await sbClient.from('albums').insert([{
-        id: album.id,
-        uid: currentUser.uid,
-        name: album.name,
-        created_at: new Date(album.createdAt).toISOString()
-      }]);
-      return;
-    } catch (e) {
-      console.warn('Supabase album save error:', e);
-    }
-  }
-
   await idbPut('albums', {
     ...album,
     createdAt: album.createdAt instanceof Date ? album.createdAt.toISOString() : album.createdAt
@@ -668,26 +504,16 @@ window.deleteCurrentAlbum = async function() {
     return;
   }
 
-  // 1. Remove album from allAlbums
   const albumObj = allAlbums.find(a => a.name.toUpperCase() === albumNameToDelete);
   allAlbums = allAlbums.filter(a => a.name.toUpperCase() !== albumNameToDelete);
 
-  // 2. Unassign album from photos
   const affectedPhotos = allPhotos.filter(p => (p.album || '').toUpperCase() === albumNameToDelete);
   affectedPhotos.forEach(p => { p.album = ''; });
 
-  // 3. Save updates to DB
   if (!guestModeActive) {
-    if (sbClient && albumObj) {
-      try {
-        await sbClient.from('albums').delete().eq('id', albumObj.id);
-        await sbClient.from('photos').update({ album: '' }).eq('album', albumNameToDelete);
-      } catch (e) { console.warn(e); }
-    } else {
-      if (albumObj) await idbDelete('albums', albumObj.id);
-      for (const p of affectedPhotos) {
-        await savePhotoToDb(p);
-      }
+    if (albumObj) await idbDelete('albums', albumObj.id);
+    for (const p of affectedPhotos) {
+      await savePhotoToDb(p);
     }
   }
 
@@ -864,26 +690,6 @@ function fileToDataURL(file) {
 
 async function savePhotoToDb(photo) {
   if (guestModeActive) return;
-
-  if (sbClient) {
-    try {
-      await sbClient.from('photos').upsert([{
-        id: photo.id,
-        uid: currentUser.uid,
-        name: photo.name,
-        url: photo.url,
-        type: photo.type,
-        fav: photo.fav,
-        album: photo.album || '',
-        size: photo.size || 0,
-        created_at: new Date(photo.createdAt).toISOString()
-      }]);
-      return;
-    } catch (e) {
-      console.warn('Supabase photo save failed, saving local:', e);
-    }
-  }
-
   await idbPut('photos', {
     ...photo,
     createdAt: photo.createdAt instanceof Date ? photo.createdAt.toISOString() : photo.createdAt
@@ -1024,7 +830,6 @@ function updateLightbox() {
   favBtn.textContent = photo.fav ? '★ HAPUS FAV' : '★ FAVORIT';
   favBtn.style.background = photo.fav ? '#8b6914' : '';
 
-  // Update album selector dropdown
   populateLightboxAlbumSelect(photo.album || '');
 }
 
@@ -1134,11 +939,7 @@ window.deletePhoto = async function() {
   filteredPhotos = filteredPhotos.filter(p => p.id !== photo.id);
 
   if (!guestModeActive) {
-    if (sbClient) {
-      try { await sbClient.from('photos').delete().eq('id', photo.id); } catch (e) { console.warn(e); }
-    } else {
-      await idbDelete('photos', photo.id);
-    }
+    await idbDelete('photos', photo.id);
   }
 
   _closeLightbox();
@@ -1214,51 +1015,6 @@ window.openLightboxById = function(id) {
 };
 
 // ============================================================
-//  DATABASE CONFIG MODAL
-// ============================================================
-window.openDbConfigModal = function() {
-  const cfg = getDbConfig();
-  document.getElementById('cfg-sb-url').value = cfg.url || '';
-  document.getElementById('cfg-sb-key').value = cfg.key || '';
-  document.getElementById('db-config-modal').style.display = 'flex';
-};
-
-window.closeDbConfigModal = function() {
-  document.getElementById('db-config-modal').style.display = 'none';
-};
-
-window.saveDbConfig = async function() {
-  const url = document.getElementById('cfg-sb-url').value.trim();
-  const key = document.getElementById('cfg-sb-key').value.trim();
-
-  if (!url || !key) {
-    alert('Harap isi URL dan Anon Key Supabase!');
-    return;
-  }
-
-  localStorage.setItem('ml_supabase_cfg', JSON.stringify({ url, key }));
-  const success = initSupabase();
-
-  if (success) {
-    alert('✓ Berhasil terhubung ke Supabase Cloud DB!');
-    closeDbConfigModal();
-    if (currentUser) {
-      await loadData();
-    }
-  } else {
-    alert('⚠️ Gagal terhubung. Pastikan URL dan Anon Key benar!');
-  }
-};
-
-window.resetToLocalDb = function() {
-  localStorage.removeItem('ml_supabase_cfg');
-  sbClient = null;
-  updateDbStatusUI(false, 'Mode Database Lokal (Offline)');
-  alert('Sekarang menggunakan Database Lokal browser.');
-  closeDbConfigModal();
-};
-
-// ============================================================
 //  NAVIGATION & SIDEBAR
 // ============================================================
 window.switchView = function(view, btn) {
@@ -1292,6 +1048,5 @@ document.addEventListener('keydown', (e) => {
     document.getElementById('create-album-modal').style.display  = 'none';
     document.getElementById('upload-modal').style.display        = 'none';
     document.getElementById('select-photos-modal').style.display = 'none';
-    document.getElementById('db-config-modal').style.display     = 'none';
   }
 });
