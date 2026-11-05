@@ -7,8 +7,6 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet" />
-  <!-- Supabase Cloud Database SDK -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -70,13 +68,6 @@
         <button class="btn-main" onclick="handleRegister()">[ DAFTAR ]</button>
         <p class="switch-txt">Sudah punya akun? <a href="#" onclick="switchForm('login')">[ LOGIN ]</a></p>
       </div>
-
-      <!-- Database Config Trigger -->
-      <div style="text-align:center; margin-top:16px;">
-        <a href="#" onclick="openDbConfigModal(); return false;" class="db-link" id="auth-db-link">
-          [ ⚡ DB: CLOUD / LOKAL ]
-        </a>
-      </div>
     </div>
   </div>
 
@@ -126,9 +117,6 @@
       <!-- Top Bar -->
       <header class="topbar">
         <button class="hamburger" onclick="toggleSidebar()" aria-label="Menu">☰</button>
-        <button class="db-badge-btn" id="db-status-btn" onclick="openDbConfigModal()" title="Pengaturan Database">
-          [ ⚡ DB: LOKAL ]
-        </button>
         <div class="search-wrap">
           <input type="text" id="search-input" placeholder="[ CARI FOTO... ]" oninput="handleSearch()" />
         </div>
@@ -268,33 +256,6 @@
       <div id="select-photos-grid" class="photo-grid sm-grid"></div>
       <div class="modal-bottom-actions">
         <button class="btn-main" onclick="saveSelectedPhotosToAlbum()">[ SIMPAN KE ALBUM ]</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- DATABASE CONFIG MODAL -->
-  <div id="db-config-modal" class="modal-overlay" style="display:none">
-    <div class="modal-box db-config-box">
-      <button class="modal-close" onclick="closeDbConfigModal()">✕</button>
-      <h3>[ DATABASE CONFIG ] ⚡</h3>
-      <p class="db-status-desc" id="db-status-desc">Status: Memeriksa koneksi database...</p>
-      <div class="field">
-        <label>SUPABASE PROJECT URL</label>
-        <input type="text" id="cfg-sb-url" placeholder="https://xyzcompany.supabase.co" />
-      </div>
-      <div class="field">
-        <label>SUPABASE ANON PUBLIC KEY</label>
-        <input type="password" id="cfg-sb-key" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI..." />
-      </div>
-      <div class="db-info-box">
-        <p>💡 <b>Ingin database cloud gratis (multi-device)?</b></p>
-        <p>1. Buat project gratis di <b>supabase.com</b></p>
-        <p>2. Jalankan query <code>schema.sql</code> di SQL Editor Supabase</p>
-        <p>3. Copy Project URL & Anon Key lalu paste di sini!</p>
-      </div>
-      <div class="modal-actions-row">
-        <button class="btn-main" onclick="saveDbConfig()">[ SIMPAN & HUBUNGKAN ]</button>
-        <button class="btn-guest" onclick="resetToLocalDb()">[ GUNAKAN DATABASE LOKAL ]</button>
       </div>
     </div>
   </div>
