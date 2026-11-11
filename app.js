@@ -229,13 +229,6 @@ function hideErr(elId) {
   if (el) el.style.display = 'none';
 }
 
-window.switchForm = function(form) {
-  document.getElementById('login-form').style.display    = form === 'login'    ? 'block' : 'none';
-  document.getElementById('register-form').style.display = form === 'register' ? 'block' : 'none';
-  hideErr('login-error');
-  hideErr('reg-error');
-};
-
 // ============================================================
 //  LOGIN & REGISTER HANDLERS
 // ============================================================
@@ -265,38 +258,6 @@ window.handleLogin = async function() {
   await loadData();
 };
 
-window.handleRegister = async function() {
-  const name  = document.getElementById('reg-name').value.trim();
-  const email = document.getElementById('reg-email').value.trim().toLowerCase();
-  const pass  = document.getElementById('reg-pass').value;
-  hideErr('reg-error');
-
-  if (!name || !email || !pass) { showErr('reg-error', 'Semua kolom harus diisi!'); return; }
-  if (pass.length < 6)          { showErr('reg-error', 'Password minimal 6 karakter.'); return; }
-  if (!email.includes('@'))     { showErr('reg-error', 'Format email tidak valid.'); return; }
-
-  const users = getLocalUsers();
-  if (users.find(u => u.email === email)) {
-    showErr('reg-error', 'Email sudah terdaftar!');
-    return;
-  }
-
-  const hash = await hashPassword(pass);
-  const uid  = 'uid_' + Date.now();
-  users.push({ uid, name, email, hash });
-  saveLocalUsers(users);
-
-  currentUser = { uid, name, email };
-  setCurrentUser(currentUser);
-  guestModeActive = false;
-  showApp();
-  await loadData();
-
-  document.getElementById('reg-name').value  = '';
-  document.getElementById('reg-email').value = '';
-  document.getElementById('reg-pass').value  = '';
-};
-
 window.handleLogout = function() {
   guestModeActive = false;
   currentUser = null;
@@ -305,20 +266,6 @@ window.handleLogout = function() {
   allAlbums = [];
   filteredPhotos = [];
   showAuth();
-};
-
-window.guestMode = function() {
-  guestModeActive = true;
-  currentUser = { uid: 'guest', name: 'Player_Guest', email: 'guest@demo.com' };
-  allPhotos = DEMO_PHOTOS.map(p => ({ ...p, createdAt: new Date(p.createdAt) }));
-  allAlbums = DEMO_ALBUMS.map(a => ({ ...a, createdAt: new Date(a.createdAt) }));
-  filteredPhotos = [...allPhotos];
-  showApp();
-  renderGallery(filteredPhotos);
-  renderAlbums();
-  renderFavorites();
-  renderMemories(allPhotos);
-  updateCounts();
 };
 
 // ============================================================
