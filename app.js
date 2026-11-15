@@ -109,60 +109,14 @@ function idbDelete(storeName, id) {
 }
 
 // ============================================================
-//  AUTH (LOCAL STORAGE + HASHED PASSWORD)
-// ============================================================
-async function hashPassword(password) {
-  try {
-    if (window.crypto && window.crypto.subtle) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(password + '_mamine_salt');
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      return Array.from(new Uint8Array(hashBuffer))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-    }
-  } catch (_) {}
-  let hash = 5381;
-  const str = password + '_mamine_salt';
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) + hash) + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return 'mc_' + Math.abs(hash).toString(16);
-}
-
-function getLocalUsers() {
-  return JSON.parse(localStorage.getItem('mamine_users') || '[]');
-}
-
-function saveLocalUsers(users) {
-  localStorage.setItem('mamine_users', JSON.stringify(users));
-}
-
-function getCurrentUser() {
-  const u = sessionStorage.getItem('mamine_current') || localStorage.getItem('mamine_current_saved');
-  return u ? JSON.parse(u) : null;
-}
-
-function setCurrentUser(user) {
-  if (user) {
-    sessionStorage.setItem('mamine_current', JSON.stringify(user));
-    localStorage.setItem('mamine_current_saved', JSON.stringify(user));
-  } else {
-    sessionStorage.removeItem('mamine_current');
-    localStorage.removeItem('mamine_current_saved');
-  }
-}
-
-// ============================================================
 //  GLOBAL STATE
 // ============================================================
-let currentUser = null;
+const LOCAL_UID = 'local';
 let allPhotos = [];
 let allAlbums = [];
 let filteredPhotos = [];
 let currentSort = 'date';
 let lightboxIndex = 0;
-let guestModeActive = false;
 let currentViewingAlbum = null;
 let uploadTargetAlbum = '';
 let selectedPhotoIdsForAlbum = new Set();
@@ -187,97 +141,19 @@ const DEMO_ALBUMS = [
 // ============================================================
 async function boot() {
   await initIndexedDB();
-
-  const saved = getCurrentUser();
-  if (saved) {
-    currentUser = saved;
-    showApp();
-    await loadData();
-  } else {
-    showAuth();
-  }
+  await loadData();
 }
 
 boot();
 
 // ============================================================
-//  UI HELPERS & SCREENS
-// ============================================================
-function showAuth() {
-  document.getElementById('auth-screen').style.display = 'flex';
-  document.getElementById('app-screen').style.display = 'none';
-}
-
-function showApp() {
-  document.getElementById('auth-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'flex';
-
-  const name = currentUser?.name || currentUser?.email?.split('@')[0] || 'Player';
-  document.getElementById('side-name').textContent = name.toUpperCase();
-  document.getElementById('side-avatar').textContent = name[0]?.toUpperCase() || '?';
-}
-
-function showErr(elId, msg) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  el.textContent = '> ERROR: ' + msg;
-  el.style.display = 'block';
-}
-
-function hideErr(elId) {
-  const el = document.getElementById(elId);
-  if (el) el.style.display = 'none';
-}
-
-// ============================================================
-//  LOGIN & REGISTER HANDLERS
-// ============================================================
-window.handleLogin = async function() {
-  const email = document.getElementById('login-email').value.trim().toLowerCase();
-  const pass  = document.getElementById('login-pass').value;
-  hideErr('login-error');
-
-  if (!email || !pass) {
-    showErr('login-error', 'Email & password harus diisi!');
-    return;
-  }
-
-  const users = getLocalUsers();
-  const hash  = await hashPassword(pass);
-  const user  = users.find(u => u.email === email && u.hash === hash);
-
-  if (!user) {
-    showErr('login-error', 'Email atau password salah.');
-    return;
-  }
-
-  currentUser = { uid: user.uid, name: user.name, email: user.email };
-  setCurrentUser(currentUser);
-  guestModeActive = false;
-  showApp();
-  await loadData();
-};
-
-window.handleLogout = function() {
-  guestModeActive = false;
-  currentUser = null;
-  setCurrentUser(null);
-  allPhotos = [];
-  allAlbums = [];
-  filteredPhotos = [];
-  showAuth();
-};
-
-// ============================================================
 //  LOAD DATA (PHOTOS & ALBUMS)
 // ============================================================
 async function loadData() {
-  if (guestModeActive || !currentUser) return;
-
   try {
     const [photos, albums] = await Promise.all([
-      idbGetAll('photos', 'uid', currentUser.uid),
-      idbGetAll('albums', 'uid', currentUser.uid)
+      idbGetAll('photos'),
+      idbGetAll('albums')
     ]);
 
     allPhotos = (photos || []).map(p => ({
@@ -311,7 +187,7 @@ function syncPhotosAlbums() {
     if (p.album && !existingNames.has(p.album.toUpperCase())) {
       const newAlb = {
         id: 'alb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-        uid: currentUser?.uid || 'local',
+        uid: LOCAL_UID,
         name: p.album.toUpperCase(),
         createdAt: new Date()
       };
@@ -352,7 +228,7 @@ window.createAlbum = async function() {
 
   const newAlbum = {
     id: 'alb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
-    uid: currentUser?.uid || 'guest',
+    uid: LOCAL_UID,
     name: albumName,
     createdAt: new Date()
   };
@@ -371,7 +247,6 @@ window.createAlbum = async function() {
 };
 
 async function saveAlbumToDb(album) {
-  if (guestModeActive) return;
   await idbPut('albums', {
     ...album,
     createdAt: album.createdAt instanceof Date ? album.createdAt.toISOString() : album.createdAt
@@ -457,11 +332,9 @@ window.deleteCurrentAlbum = async function() {
   const affectedPhotos = allPhotos.filter(p => (p.album || '').toUpperCase() === albumNameToDelete);
   affectedPhotos.forEach(p => { p.album = ''; });
 
-  if (!guestModeActive) {
-    if (albumObj) await idbDelete('albums', albumObj.id);
-    for (const p of affectedPhotos) {
-      await savePhotoToDb(p);
-    }
+  if (albumObj) await idbDelete('albums', albumObj.id);
+  for (const p of affectedPhotos) {
+    await savePhotoToDb(p);
   }
 
   closeAlbumModal();
@@ -586,7 +459,7 @@ window.handleFileSelect = async function(event) {
 
       const photo = {
         id: 'photo_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-        uid: currentUser.uid,
+        uid: LOCAL_UID,
         name: file.name,
         url: dataUrl,
         type: file.type.startsWith('video') ? 'video' : 'image',
@@ -612,7 +485,7 @@ window.handleFileSelect = async function(event) {
     document.getElementById('upload-status').textContent = `[ UPLOADING... ] ${done} / ${files.length}`;
   }
 
-  document.getElementById('upload-status').textContent = `[ SELESAI! ] ${done} foto berhasil diupload. ⛏️`;
+  document.getElementById('upload-status').textContent = `[ SELESAI! ] ${done} foto berhasil diupload. 🐰`;
 
   filteredPhotos = [...allPhotos];
   renderGallery(filteredPhotos);
@@ -636,7 +509,6 @@ function fileToDataURL(file) {
 }
 
 async function savePhotoToDb(photo) {
-  if (guestModeActive) return;
   await idbPut('photos', {
     ...photo,
     createdAt: photo.createdAt instanceof Date ? photo.createdAt.toISOString() : photo.createdAt
@@ -885,9 +757,7 @@ window.deletePhoto = async function() {
   allPhotos = allPhotos.filter(p => p.id !== photo.id);
   filteredPhotos = filteredPhotos.filter(p => p.id !== photo.id);
 
-  if (!guestModeActive) {
-    await idbDelete('photos', photo.id);
-  }
+  await idbDelete('photos', photo.id);
 
   _closeLightbox();
   renderGallery(filteredPhotos);
