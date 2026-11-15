@@ -23,8 +23,28 @@
     <div class="deco-heart h3">♥</div>
   </div>
 
+  <!-- LOCK SCREEN (satu password) -->
+  <div id="auth-screen" class="screen" style="display:none">
+    <div class="auth-card">
+      <div class="logo-area">
+        <span class="logo-icon">🐰</span>
+        <h1 class="logo-title">mamine</h1>
+        <p class="logo-sub">[ sayang mimine ]</p>
+      </div>
+      <div>
+        <h2>Masuk</h2>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')handleLogin()" />
+        </div>
+        <div id="login-error" class="error-msg" style="display:none"></div>
+        <button class="btn-main" onclick="handleLogin()">[ MASUK ]</button>
+      </div>
+    </div>
+  </div>
+
   <!-- MAIN APP -->
-  <div id="app-screen" class="screen">
+  <div id="app-screen" class="screen" style="display:none">
 
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
@@ -58,6 +78,11 @@
           🌙 KENANGAN
         </button>
       </nav>
+
+      <div class="sidebar-footer">
+        <button class="btn-logout" id="btn-migrate" style="display:none;margin-bottom:8px;background:#2f6b8a" onclick="migrateLegacy()">☁️ PINDAHKAN FOTO LAMA</button>
+        <button class="btn-logout" onclick="handleLogout()">Keluar →</button>
+      </div>
 
     </aside>
 
@@ -222,6 +247,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <!-- App Script -->
   <script src="app.js"></script>
 </body>
