@@ -1,9 +1,23 @@
 // mamine — app.js
-// 100% Client-Side & Local Database (IndexedDB + localStorage)
-// Tanpa konfigurasi eksternal — Langsung jalan out-of-the-box!
+// Backend: Supabase (Auth + Postgres + Storage). Foto tersimpan di cloud,
+// jadi bisa dibuka dari perangkat mana pun.
+// IndexedDB lama hanya dibaca untuk memindahkan data lama ke cloud.
 
 // ============================================================
-//  INDEXEDDB SETUP (LOCAL DATABASE)
+//  SUPABASE CONFIG
+// ============================================================
+const SUPABASE_URL = 'https://tyaplawpnosyrvuxkjxn.supabase.co';
+// Publishable key: aman dipakai di browser selama RLS aktif.
+// JANGAN pernah taruh secret key (sb_secret_...) di file ini.
+const SUPABASE_KEY = 'sb_publishable_CkxjLEUQcWL59NsO2n02ZA_hwmZdAyW';
+const OWNER_EMAIL  = 'zatulakmam296@gmail.com';
+const BUCKET       = 'photos';
+const SIGNED_URL_TTL = 60 * 60 * 24; // 24 jam; di-refresh tiap halaman dimuat
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ============================================================
+//  LEGACY LOCAL DB (hanya untuk membaca data lama)
 // ============================================================
 let db = null;
 
@@ -63,55 +77,9 @@ function idbGetAll(storeName, indexName, key) {
   });
 }
 
-function idbPut(storeName, data) {
-  return new Promise((resolve) => {
-    if (!db) {
-      const fallbackKey = storeName === 'albums' ? 'mamine_albums' : 'mamine_photos';
-      const all = JSON.parse(localStorage.getItem(fallbackKey) || '[]');
-      const idx = all.findIndex(p => p.id === data.id);
-      if (idx >= 0) all[idx] = data; else all.push(data);
-      try { localStorage.setItem(fallbackKey, JSON.stringify(all)); } catch (_) {}
-      resolve(data);
-      return;
-    }
-    try {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const req = store.put(data);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
-    } catch (_) {
-      resolve(null);
-    }
-  });
-}
-
-function idbDelete(storeName, id) {
-  return new Promise((resolve) => {
-    if (!db) {
-      const fallbackKey = storeName === 'albums' ? 'mamine_albums' : 'mamine_photos';
-      const all = JSON.parse(localStorage.getItem(fallbackKey) || '[]');
-      const filtered = all.filter(p => p.id !== id);
-      try { localStorage.setItem(fallbackKey, JSON.stringify(filtered)); } catch (_) {}
-      resolve();
-      return;
-    }
-    try {
-      const tx = db.transaction(storeName, 'readwrite');
-      const store = tx.objectStore(storeName);
-      const req = store.delete(id);
-      req.onsuccess = () => resolve();
-      req.onerror = () => resolve();
-    } catch (_) {
-      resolve();
-    }
-  });
-}
-
 // ============================================================
 //  GLOBAL STATE
 // ============================================================
-const LOCAL_UID = 'local';
 let allPhotos = [];
 let allAlbums = [];
 let filteredPhotos = [];
@@ -121,52 +89,168 @@ let currentViewingAlbum = null;
 let uploadTargetAlbum = '';
 let selectedPhotoIdsForAlbum = new Set();
 
-const DEMO_PHOTOS = [
-  { id:'d1', name:'Bunga Sakura.jpg', url:'https://images.unsplash.com/photo-1522383225653-ed111181a951?w=600', type:'image', fav:false, createdAt: new Date('2026-10-01').getTime(), album:'MAMINE_CANTIK' },
-  { id:'d2', name:'Pantai Sunset.jpg', url:'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600', type:'image', fav:true,  createdAt: new Date('2026-09-15').getTime(), album:'LIBURAN' },
-  { id:'d3', name:'Kopi Pagi.jpg',     url:'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=600', type:'image', fav:false, createdAt: new Date('2026-08-20').getTime(), album:'' },
-  { id:'d4', name:'Hutan Hijau.jpg',   url:'https://images.unsplash.com/photo-1448375240586-882707db888b?w=600', type:'image', fav:false, createdAt: new Date('2026-07-10').getTime(), album:'ALAM' },
-  { id:'d5', name:'Bunga Liar.jpg',    url:'https://images.unsplash.com/photo-1490750967868-88df5691cc34?w=600', type:'image', fav:true,  createdAt: new Date('2026-06-05').getTime(), album:'ALAM' },
-  { id:'d6', name:'Jalan Kota.jpg',    url:'https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=600', type:'image', fav:false, createdAt: new Date('2026-05-22').getTime(), album:'' },
-];
-
-const DEMO_ALBUMS = [
-  { id: 'alb_demo1', name: 'MAMINE_CANTIK', createdAt: new Date('2026-10-01').getTime() },
-  { id: 'alb_demo2', name: 'LIBURAN', createdAt: new Date('2026-09-15').getTime() },
-  { id: 'alb_demo3', name: 'ALAM', createdAt: new Date('2026-07-10').getTime() },
-];
 
 // ============================================================
-//  BOOT
+//  AUTH (satu password, akun tetap di Supabase)
 // ============================================================
-async function boot() {
-  await initIndexedDB();
+function showLock() {
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('app-screen').style.display = 'none';
+}
+
+async function enterApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'flex';
   await loadData();
+  await checkLegacyData();
+}
+
+window.handleLogin = async function() {
+  const passEl = document.getElementById('login-pass');
+  const errEl  = document.getElementById('login-error');
+  errEl.style.display = 'none';
+
+  if (!passEl.value) {
+    errEl.textContent = '> ERROR: Password harus diisi!';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  const { error } = await sb.auth.signInWithPassword({ email: OWNER_EMAIL, password: passEl.value });
+  if (error) {
+    errEl.textContent = '> ERROR: Password salah atau koneksi bermasalah.';
+    errEl.style.display = 'block';
+    return;
+  }
+  passEl.value = '';
+  await enterApp();
+};
+
+window.handleLogout = async function() {
+  await sb.auth.signOut();
+  allPhotos = [];
+  allAlbums = [];
+  filteredPhotos = [];
+  showLock();
+};
+
+async function boot() {
+  const { data } = await sb.auth.getSession();
+  if (data && data.session) await enterApp();
+  else showLock();
 }
 
 boot();
+
+// Tampilkan pesan kalau ada operasi cloud yang gagal tanpa ditangani
+window.addEventListener('unhandledrejection', (e) => {
+  console.error(e.reason);
+  alert('Terjadi kesalahan saat menghubungi server. Cek koneksi internet lalu coba lagi.');
+});
+
+// ============================================================
+//  CLOUD HELPERS
+// ============================================================
+async function getSignedUrlMap(paths) {
+  const map = {};
+  for (let i = 0; i < paths.length; i += 100) {
+    const chunk = paths.slice(i, i + 100);
+    const { data, error } = await sb.storage.from(BUCKET).createSignedUrls(chunk, SIGNED_URL_TTL);
+    if (error) throw error;
+    (data || []).forEach(d => { if (d.signedUrl) map[d.path] = d.signedUrl; });
+  }
+  return map;
+}
+
+function photoToRow(photo) {
+  return {
+    id: photo.id,
+    name: photo.name,
+    path: photo.path,
+    type: photo.type,
+    fav: !!photo.fav,
+    album: photo.album || '',
+    created_at: (photo.createdAt instanceof Date ? photo.createdAt : new Date(photo.createdAt)).toISOString()
+  };
+}
+
+async function savePhotoToDb(photo) {
+  const { error } = await sb.from('photos').upsert(photoToRow(photo));
+  if (error) throw error;
+}
+
+async function saveAlbumToDb(album) {
+  const { error } = await sb.from('albums').upsert({
+    id: album.id,
+    name: album.name,
+    created_at: (album.createdAt instanceof Date ? album.createdAt : new Date(album.createdAt)).toISOString()
+  });
+  if (error) throw error;
+}
+
+function extFromName(name) {
+  const e = String(name || '').split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return e && e.length <= 5 ? e : 'bin';
+}
+
+// Foto JPEG/HEIC dikecilkan (maks 2400px, kualitas 85%) supaya hemat kuota dan cepat dimuat.
+// Video dan format lain diunggah apa adanya. Kalau kompresi gagal, file asli yang diunggah.
+async function prepareFile(file) {
+  const compressible = /^image\/(jpeg|jpg|heic|heif)$/i.test(file.type);
+  if (compressible) {
+    try {
+      const bmp = await createImageBitmap(file);
+      const MAX = 2400;
+      const scale = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
+      if (scale < 1 || file.size > 1.5 * 1024 * 1024) {
+        const canvas = document.createElement('canvas');
+        canvas.width  = Math.round(bmp.width * scale);
+        canvas.height = Math.round(bmp.height * scale);
+        canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85));
+        if (blob && blob.size < file.size) {
+          return { blob, contentType: 'image/jpeg', ext: 'jpg' };
+        }
+      }
+    } catch (_) { /* pakai file asli */ }
+  }
+  return { blob: file, contentType: file.type || 'application/octet-stream', ext: extFromName(file.name) };
+}
 
 // ============================================================
 //  LOAD DATA (PHOTOS & ALBUMS)
 // ============================================================
 async function loadData() {
   try {
-    const [photos, albums] = await Promise.all([
-      idbGetAll('photos'),
-      idbGetAll('albums')
+    const [pRes, aRes] = await Promise.all([
+      sb.from('photos').select('*').order('created_at', { ascending: false }),
+      sb.from('albums').select('*')
     ]);
+    if (pRes.error) throw pRes.error;
+    if (aRes.error) throw aRes.error;
 
-    allPhotos = (photos || []).map(p => ({
-      ...p,
-      createdAt: new Date(p.createdAt || 0)
-    })).sort((a, b) => b.createdAt - a.createdAt);
+    const rows = pRes.data || [];
+    const urlMap = await getSignedUrlMap(rows.map(r => r.path));
 
-    allAlbums = (albums || []).map(a => ({
-      ...a,
-      createdAt: new Date(a.createdAt || 0)
+    allPhotos = rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      path: r.path,
+      type: r.type,
+      fav: !!r.fav,
+      album: r.album || '',
+      createdAt: new Date(r.created_at),
+      url: urlMap[r.path] || ''
+    }));
+
+    allAlbums = (aRes.data || []).map(a => ({
+      id: a.id,
+      name: a.name,
+      createdAt: new Date(a.created_at)
     }));
   } catch (e) {
     console.error('Data load failed:', e);
+    alert('Gagal memuat data dari server. Cek koneksi internet lalu muat ulang halaman.');
     allPhotos = [];
     allAlbums = [];
   }
@@ -187,7 +271,6 @@ function syncPhotosAlbums() {
     if (p.album && !existingNames.has(p.album.toUpperCase())) {
       const newAlb = {
         id: 'alb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-        uid: LOCAL_UID,
         name: p.album.toUpperCase(),
         createdAt: new Date()
       };
@@ -197,6 +280,85 @@ function syncPhotosAlbums() {
     }
   });
 }
+
+// ============================================================
+//  PINDAHKAN DATA LAMA (IndexedDB browser -> cloud)
+// ============================================================
+let legacyPhotos = [];
+let legacyAlbums = [];
+let legacyLoaded = false;
+
+async function checkLegacyData() {
+  if (!legacyLoaded) {
+    try {
+      await initIndexedDB();
+      legacyPhotos = (await idbGetAll('photos')) || [];
+      legacyAlbums = (await idbGetAll('albums')) || [];
+    } catch (_) {}
+    legacyLoaded = true;
+  }
+  const cloudIds = new Set(allPhotos.map(p => p.id));
+  const remaining = legacyPhotos.filter(p => !cloudIds.has(p.id));
+  const btn = document.getElementById('btn-migrate');
+  if (!btn) return;
+  btn.disabled = false;
+  btn.style.display = remaining.length ? 'block' : 'none';
+  btn.textContent = `☁️ PINDAHKAN ${remaining.length} FOTO LAMA`;
+}
+
+window.migrateLegacy = async function() {
+  const cloudIds = new Set(allPhotos.map(p => p.id));
+  const todo = legacyPhotos.filter(p => !cloudIds.has(p.id));
+  if (!todo.length) return;
+  if (!confirm(`Unggah ${todo.length} foto lama dari browser ini ke cloud? Data lama di browser tidak dihapus.`)) return;
+
+  const btn = document.getElementById('btn-migrate');
+  btn.disabled = true;
+  let ok = 0, fail = 0;
+
+  for (let i = 0; i < todo.length; i++) {
+    const lp = todo[i];
+    btn.textContent = `⏳ ${i + 1} / ${todo.length}`;
+    try {
+      const blob = await (await fetch(lp.url)).blob();
+      const ext  = extFromName(lp.name) !== 'bin' ? extFromName(lp.name) : (blob.type.split('/')[1] || 'bin');
+      const path = `${lp.id}.${ext}`;
+      const { error: upErr } = await sb.storage.from(BUCKET).upload(path, blob, {
+        contentType: blob.type || 'application/octet-stream',
+        cacheControl: '31536000',
+        upsert: true
+      });
+      if (upErr) throw upErr;
+      await savePhotoToDb({
+        id: lp.id,
+        name: lp.name,
+        path,
+        type: lp.type || (blob.type.startsWith('video') ? 'video' : 'image'),
+        fav: !!lp.fav,
+        album: lp.album || '',
+        createdAt: lp.createdAt || new Date()
+      });
+      ok++;
+    } catch (e) {
+      console.error('Migrasi gagal:', lp.name, e);
+      fail++;
+    }
+  }
+
+  const albumNames = new Set(allAlbums.map(a => a.name.toUpperCase()));
+  for (const la of legacyAlbums) {
+    const n = String(la.name || '').toUpperCase();
+    if (!n || albumNames.has(n)) continue;
+    try {
+      await saveAlbumToDb({ id: la.id, name: n, createdAt: la.createdAt || new Date() });
+      albumNames.add(n);
+    } catch (e) { console.error(e); }
+  }
+
+  await loadData();
+  await checkLegacyData();
+  alert(`Selesai: ${ok} berhasil, ${fail} gagal. Data lama di browser ini tidak dihapus otomatis.`);
+};
 
 function updateCounts() {
   document.getElementById('photo-count').textContent = allPhotos.length;
@@ -228,7 +390,6 @@ window.createAlbum = async function() {
 
   const newAlbum = {
     id: 'alb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
-    uid: LOCAL_UID,
     name: albumName,
     createdAt: new Date()
   };
@@ -245,13 +406,6 @@ window.createAlbum = async function() {
   // Open the newly created album directly so user can add photos
   openAlbum(albumName);
 };
-
-async function saveAlbumToDb(album) {
-  await idbPut('albums', {
-    ...album,
-    createdAt: album.createdAt instanceof Date ? album.createdAt.toISOString() : album.createdAt
-  });
-}
 
 function renderAlbums() {
   const grid = document.getElementById('albums-grid');
@@ -332,7 +486,10 @@ window.deleteCurrentAlbum = async function() {
   const affectedPhotos = allPhotos.filter(p => (p.album || '').toUpperCase() === albumNameToDelete);
   affectedPhotos.forEach(p => { p.album = ''; });
 
-  if (albumObj) await idbDelete('albums', albumObj.id);
+  if (albumObj) {
+    const { error } = await sb.from('albums').delete().eq('id', albumObj.id);
+    if (error) console.error(error);
+  }
   for (const p of affectedPhotos) {
     await savePhotoToDb(p);
   }
@@ -455,21 +612,36 @@ window.handleFileSelect = async function(event) {
     statusEl.textContent = 'uploading...';
 
     try {
-      const dataUrl = await fileToDataURL(file);
+      const { blob, contentType, ext } = await prepareFile(file);
+      const id   = 'photo_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      const path = `${id}.${ext}`;
+
+      const { error: upErr } = await sb.storage.from(BUCKET).upload(path, blob, {
+        contentType,
+        cacheControl: '31536000'
+      });
+      if (upErr) throw upErr;
 
       const photo = {
-        id: 'photo_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-        uid: LOCAL_UID,
+        id,
         name: file.name,
-        url: dataUrl,
+        path,
+        url: '',
         type: file.type.startsWith('video') ? 'video' : 'image',
         fav: false,
         album: assignedAlbum,
-        createdAt: new Date(),
-        size: file.size
+        createdAt: new Date()
       };
 
-      await savePhotoToDb(photo);
+      try {
+        await savePhotoToDb(photo);
+      } catch (dbErr) {
+        await sb.storage.from(BUCKET).remove([path]);
+        throw dbErr;
+      }
+
+      const urlMap = await getSignedUrlMap([path]);
+      photo.url = urlMap[path] || '';
       allPhotos.unshift(photo);
 
       statusEl.textContent = '✓ OK';
@@ -498,22 +670,6 @@ window.handleFileSelect = async function(event) {
     openAlbum(currentViewingAlbum);
   }
 };
-
-function fileToDataURL(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = (e) => resolve(e.target.result);
-    reader.onerror = (e) => reject(e);
-    reader.readAsDataURL(file);
-  });
-}
-
-async function savePhotoToDb(photo) {
-  await idbPut('photos', {
-    ...photo,
-    createdAt: photo.createdAt instanceof Date ? photo.createdAt.toISOString() : photo.createdAt
-  });
-}
 
 window.closeUploadModal = function() {
   document.getElementById('upload-modal').style.display = 'none';
@@ -754,10 +910,16 @@ window.deletePhoto = async function() {
 
   if (!confirm(`Hapus "${photo.name}"?`)) return;
 
+  const { error: delErr } = await sb.from('photos').delete().eq('id', photo.id);
+  if (delErr) {
+    console.error(delErr);
+    alert('Gagal menghapus foto. Coba lagi.');
+    return;
+  }
+  await sb.storage.from(BUCKET).remove([photo.path]);
+
   allPhotos = allPhotos.filter(p => p.id !== photo.id);
   filteredPhotos = filteredPhotos.filter(p => p.id !== photo.id);
-
-  await idbDelete('photos', photo.id);
 
   _closeLightbox();
   renderGallery(filteredPhotos);
@@ -772,15 +934,22 @@ window.deletePhoto = async function() {
 // ============================================================
 //  DOWNLOAD PHOTO
 // ============================================================
-window.downloadPhoto = function() {
+window.downloadPhoto = async function() {
   const photo = currentLightboxList[lightboxIndex];
   if (!photo) return;
 
-  const a = document.createElement('a');
-  a.href     = photo.url;
-  a.download = photo.name;
-  a.target   = '_blank';
-  a.click();
+  try {
+    const res  = await fetch(photo.url);
+    const blob = await res.blob();
+    const objUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = objUrl;
+    a.download = photo.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(objUrl), 10000);
+  } catch (_) {
+    window.open(photo.url, '_blank');
+  }
 };
 
 // ============================================================
